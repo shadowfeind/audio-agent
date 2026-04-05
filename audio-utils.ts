@@ -114,7 +114,7 @@ export async function collectStreamedAudio(
     return {
       extension: "wav",
       content: convertToWav(base64Chunks.join(""), resolvedMimeType),
-      mimeType: resolvedMimeType,
+      mimeType: "audio/wav",
     };
   }
 
