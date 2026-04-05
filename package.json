@@ -1,0 +1,26 @@
+{
+  "name": "audio-agent",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "create": "tsx agent.ts",
+    "single": "tsx single-agent.ts",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "generate:listening": "tsx generate-listening-exam-audio.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@google/genai": "^1.37.0",
+    "dotenv": "^17.2.3",
+    "mime": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.9",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
