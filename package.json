@@ -6,7 +6,7 @@
   "scripts": {
     "create": "tsx agent.ts",
     "single": "tsx single-agent.ts",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --import tsx --test audio-utils.test.ts",
     "generate:listening": "tsx generate-listening-exam-audio.ts"
   },
   "keywords": [],

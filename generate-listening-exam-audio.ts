@@ -2,7 +2,7 @@ import "dotenv/config";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { GoogleGenAI } from "@google/genai";
-import mime from "mime";
+import { collectStreamedAudio } from "./audio-utils";
 
 type QuestionType =
   | "summarize_spoken_text"
@@ -53,8 +53,8 @@ type ManifestEntry = {
   questionType: QuestionType;
   originalAssetUrl: string | null;
   transcriptLength: number;
-  voiceName: VoiceName;
-  accent: AccentCode;
+  voiceName: VoiceName | null;
+  accent: AccentCode | null;
   outputFile: string | null;
   status: "generated" | "skipped" | "failed";
   error: string | null;
@@ -191,68 +191,6 @@ function parseArgs(argv: string[]) {
   };
 }
 
-function parseMimeType(mimeType: string) {
-  const [fileType, ...params] = mimeType.split(";").map((segment) => segment.trim());
-  const [, format] = fileType.split("/");
-
-  const options: { numChannels: number; sampleRate?: number; bitsPerSample?: number } = {
-    numChannels: 1,
-  };
-
-  if (format?.startsWith("L")) {
-    const bits = Number.parseInt(format.slice(1), 10);
-    if (!Number.isNaN(bits)) {
-      options.bitsPerSample = bits;
-    }
-  }
-
-  for (const param of params) {
-    const [key, value] = param.split("=").map((segment) => segment.trim());
-    if (key === "rate") {
-      const sampleRate = Number.parseInt(value, 10);
-      if (!Number.isNaN(sampleRate)) {
-        options.sampleRate = sampleRate;
-      }
-    }
-  }
-
-  return {
-    numChannels: options.numChannels,
-    sampleRate: options.sampleRate ?? 24000,
-    bitsPerSample: options.bitsPerSample ?? 16,
-  };
-}
-
-function createWavHeader(dataLength: number, options: { numChannels: number; sampleRate: number; bitsPerSample: number }) {
-  const { numChannels, sampleRate, bitsPerSample } = options;
-  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
-  const blockAlign = (numChannels * bitsPerSample) / 8;
-  const buffer = Buffer.alloc(44);
-
-  buffer.write("RIFF", 0);
-  buffer.writeUInt32LE(36 + dataLength, 4);
-  buffer.write("WAVE", 8);
-  buffer.write("fmt ", 12);
-  buffer.writeUInt32LE(16, 16);
-  buffer.writeUInt16LE(1, 20);
-  buffer.writeUInt16LE(numChannels, 22);
-  buffer.writeUInt32LE(sampleRate, 24);
-  buffer.writeUInt32LE(byteRate, 28);
-  buffer.writeUInt16LE(blockAlign, 32);
-  buffer.writeUInt16LE(bitsPerSample, 34);
-  buffer.write("data", 36);
-  buffer.writeUInt32LE(dataLength, 40);
-
-  return buffer;
-}
-
-function convertToWav(rawData: string, mimeType: string) {
-  const options = parseMimeType(mimeType);
-  const header = createWavHeader(rawData.length, options);
-  const audioBuffer = Buffer.from(rawData, "base64");
-  return Buffer.concat([header, audioBuffer]);
-}
-
 function createVoiceProfile(questionType: QuestionType, rng: () => number): VoiceProfile {
   const rule = QUESTION_VOICE_RULES[questionType];
   const voiceName = pickOne(rule.voices, rng);
@@ -298,25 +236,7 @@ async function synthesizeQuestionAudio(ai: GoogleGenAI, transcript: string, prof
       },
     ],
   });
-
-  for await (const chunk of response) {
-    const inlineData = chunk.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-    if (!inlineData?.data) {
-      continue;
-    }
-
-    let extension = mime.getExtension(inlineData.mimeType || "") || "wav";
-    let content = Buffer.from(inlineData.data, "base64");
-
-    if (!mime.getExtension(inlineData.mimeType || "")) {
-      extension = "wav";
-      content = convertToWav(inlineData.data, inlineData.mimeType || "audio/L16;rate=24000");
-    }
-
-    return { extension, content };
-  }
-
-  throw new Error("No audio payload was returned by the TTS stream.");
+  return collectStreamedAudio(response);
 }
 
 async function main() {
@@ -344,7 +264,7 @@ async function main() {
   for (const [index, question] of exam.questions.entries()) {
     const asset = question.assets?.find((entry) => entry.kind === "audio") ?? question.assets?.[0];
     const transcript = asset?.transcript?.trim();
-    const profile = createVoiceProfile(question.questionType, rng);
+    const rule = QUESTION_VOICE_RULES[question.questionType];
 
     const baseEntry = {
       index: index + 1,
@@ -352,9 +272,23 @@ async function main() {
       questionType: question.questionType,
       originalAssetUrl: asset?.url ?? null,
       transcriptLength: transcript?.length ?? 0,
-      voiceName: profile.voiceName,
-      accent: profile.accentCode,
+      voiceName: null as VoiceName | null,
+      accent: null as AccentCode | null,
     };
+
+    if (!rule) {
+      manifest.push({
+        ...baseEntry,
+        outputFile: null,
+        status: "failed",
+        error: `Unsupported question type: ${question.questionType}`,
+      });
+      continue;
+    }
+
+    const profile = createVoiceProfile(question.questionType, rng);
+    baseEntry.voiceName = profile.voiceName;
+    baseEntry.accent = profile.accentCode;
 
     if (!transcript) {
       manifest.push({
