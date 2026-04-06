@@ -4,6 +4,13 @@ import path from "path";
 import { GoogleGenAI } from "@google/genai";
 import { collectStreamedAudio } from "./audio-utils";
 import { UTApi } from "uploadthing/server";
+import {
+  createDeterministicSpeakerAssignments,
+  detectTwoSpeakerDialogue,
+  hashString,
+  type SpeakerAssignment,
+  type VoiceName,
+} from "./speaker-utils";
 
 type QuestionType =
   | "summarize_spoken_text"
@@ -16,14 +23,6 @@ type QuestionType =
   | "write_from_dictation";
 
 type AccentCode = "en-US" | "en-GB" | "en-AU";
-type VoiceName =
-  | "Aoede"
-  | "Puck"
-  | "Kore"
-  | "Fenrir"
-  | "Enceladus"
-  | "Achernar"
-  | "Algenib";
 
 type ExamQuestion = {
   questionType: QuestionType;
@@ -55,12 +54,30 @@ type QuestionVoiceRule = {
   pacing: string;
 };
 
+type SingleSpeakerPlan = {
+  mode: "single";
+  profile: VoiceProfile;
+};
+
+type MultiSpeakerPlan = {
+  mode: "multi";
+  accentCode: AccentCode;
+  accentLabel: string;
+  speakingStyle: string;
+  pacing: string;
+  speakerAssignments: SpeakerAssignment[];
+};
+
+type SpeechPlan = SingleSpeakerPlan | MultiSpeakerPlan;
+
 type ManifestEntry = {
   index: number;
   title: string;
   questionType: QuestionType;
   originalAssetUrl: string | null;
   transcriptLength: number;
+  speakerMode: "single" | "multi";
+  speakerAssignments: SpeakerAssignment[] | null;
   voiceName: VoiceName | null;
   accent: AccentCode | null;
   outputFile: string | null;
@@ -73,6 +90,15 @@ type ManifestEntry = {
 const MODEL = "gemini-2.5-pro-preview-tts";
 const DEFAULT_OUTPUT_ROOT = path.resolve(__dirname, "generated", "listening");
 const ALL_ACCENTS: AccentCode[] = ["en-US", "en-GB", "en-AU"];
+const DIALOGUE_VOICES: VoiceName[] = [
+  "Kore",
+  "Fenrir",
+  "Enceladus",
+  "Achernar",
+  "Aoede",
+  "Puck",
+  "Algenib",
+];
 
 const ACCENT_LABELS: Record<AccentCode, string> = {
   "en-US": "American English",
@@ -157,15 +183,6 @@ function slugify(value: string) {
   );
 }
 
-function hashString(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
 function createRng(seed: number) {
   let state = seed || 1;
   return () => {
@@ -238,36 +255,105 @@ function createVoiceProfile(
   };
 }
 
+function createSpeechPlan(
+  questionType: QuestionType,
+  transcript: string,
+  seedText: string,
+  rng: () => number,
+): SpeechPlan {
+  const rule = QUESTION_VOICE_RULES[questionType];
+  const dialogue = detectTwoSpeakerDialogue(transcript);
+
+  if (!dialogue) {
+    return {
+      mode: "single",
+      profile: createVoiceProfile(questionType, rng),
+    };
+  }
+
+  const accentSeed = hashString(`${seedText}:${transcript}:${questionType}:accent`);
+  const accentCode = rule.accents[accentSeed % rule.accents.length]!;
+
+  return {
+    mode: "multi",
+    accentCode,
+    accentLabel: ACCENT_LABELS[accentCode],
+    speakingStyle: rule.speakingStyle,
+    pacing: rule.pacing,
+    speakerAssignments: createDeterministicSpeakerAssignments(
+      dialogue.speakers,
+      DIALOGUE_VOICES,
+      seedText,
+      transcript,
+    ),
+  };
+}
+
 async function synthesizeQuestionAudio(
   ai: GoogleGenAI,
   transcript: string,
-  profile: VoiceProfile,
+  plan: SpeechPlan,
 ) {
+  const config =
+    plan.mode === "single"
+      ? {
+          temperature: 1,
+          responseModalities: ["audio"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: plan.profile.voiceName,
+              },
+            },
+          },
+        }
+      : {
+          temperature: 1,
+          responseModalities: ["audio"],
+          speechConfig: {
+            multiSpeakerVoiceConfig: {
+              speakerVoiceConfigs: plan.speakerAssignments.map(
+                ({ speaker, voiceName }) => ({
+                  speaker,
+                  voiceConfig: {
+                    prebuiltVoiceConfig: {
+                      voiceName,
+                    },
+                  },
+                }),
+              ),
+            },
+          },
+        };
+
+  const promptText =
+    plan.mode === "single"
+      ? [
+          `Speak in ${plan.profile.accentLabel}.`,
+          `Use a ${plan.profile.speakingStyle} tone.`,
+          `Keep the pacing ${plan.profile.pacing}.`,
+          "Read the following transcript exactly as written.",
+          transcript,
+        ].join(" ")
+      : [
+          `Perform the following two-speaker dialogue in ${plan.accentLabel}.`,
+          `Use a ${plan.speakingStyle} tone and keep the pacing ${plan.pacing}.`,
+          "Use the named speakers exactly as labeled in the transcript.",
+          "Do not read the speaker labels aloud as narration.",
+          "Render the conversation naturally as two distinct speakers.",
+          "Read the dialogue content exactly as written.",
+          transcript,
+        ].join(" ");
+
   const response = await ai.models.generateContentStream({
     model: MODEL,
-    config: {
-      temperature: 1,
-      responseModalities: ["audio"],
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: {
-            voiceName: profile.voiceName,
-          },
-        },
-      },
-    },
+    config,
     contents: [
       {
         role: "user",
         parts: [
           {
-            text: [
-              `Speak in ${profile.accentLabel}.`,
-              `Use a ${profile.speakingStyle} tone.`,
-              `Keep the pacing ${profile.pacing}.`,
-              "Read the following transcript exactly as written.",
-              transcript,
-            ].join(" "),
+            text: promptText,
           },
         ],
       },
@@ -361,6 +447,8 @@ async function main() {
       questionType: question.questionType,
       originalAssetUrl: asset?.url ?? null,
       transcriptLength: transcript?.length ?? 0,
+      speakerMode: "single" as "single" | "multi",
+      speakerAssignments: null as SpeakerAssignment[] | null,
       voiceName: null as VoiceName | null,
       accent: null as AccentCode | null,
     };
@@ -384,10 +472,6 @@ async function main() {
       continue;
     }
 
-    const profile = createVoiceProfile(question.questionType, rng);
-    baseEntry.voiceName = profile.voiceName;
-    baseEntry.accent = profile.accentCode;
-
     if (!transcript) {
       manifest.push({
         ...baseEntry,
@@ -408,7 +492,21 @@ async function main() {
     }
 
     try {
-      const audio = await synthesizeQuestionAudio(ai, transcript, profile);
+      const plan = createSpeechPlan(
+        question.questionType,
+        transcript,
+        seedText,
+        rng,
+      );
+      baseEntry.speakerMode = plan.mode;
+      baseEntry.speakerAssignments =
+        plan.mode === "multi" ? plan.speakerAssignments : null;
+      baseEntry.voiceName =
+        plan.mode === "single" ? plan.profile.voiceName : null;
+      baseEntry.accent =
+        plan.mode === "single" ? plan.profile.accentCode : plan.accentCode;
+
+      const audio = await synthesizeQuestionAudio(ai, transcript, plan);
       const fileName = `${String(index + 1).padStart(2, "0")}-${question.questionType}-${slugify(question.title)}.${audio.extension}`;
       const outputPath = path.join(finalOutputDir, fileName);
       await writeFile(outputPath, audio.content);
@@ -442,8 +540,12 @@ async function main() {
         seedText,
         manifest,
       );
+      const voiceLog =
+        plan.mode === "single"
+          ? `${plan.profile.voiceName}, ${plan.profile.accentCode}`
+          : `${plan.speakerAssignments.map(({ speaker, voiceName }) => `${speaker}=${voiceName}`).join(", ")}, ${plan.accentCode}`;
       console.log(
-        `Generated audio for question ${index + 1}: ${question.title} [${profile.voiceName}, ${profile.accentCode}]`,
+        `Generated audio for question ${index + 1}: ${question.title} [${voiceLog}]`,
       );
     } catch (error) {
       manifest.push({
