@@ -6,7 +6,7 @@
   "scripts": {
     "create": "tsx agent.ts",
     "single": "tsx single-agent.ts",
-    "test": "node --import tsx --test audio-utils.test.ts",
+    "test": "node --import tsx --test *.test.ts",
     "generate:listening": "tsx generate-listening-exam-audio.ts",
     "upload:exam1": "tsx upload-existing-audio.ts"
   },
