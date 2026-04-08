@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { collectStreamedAudio, convertToWav, parseMimeType } from "./audio-utils";
+import {
+  collectStreamedAudio,
+  convertToWav,
+  createWavHeader,
+  mergeWavAudioSegments,
+  parseMimeType,
+} from "./audio-utils";
 
 test("parseMimeType falls back to safe PCM defaults", () => {
   assert.deepEqual(parseMimeType("audio/L16"), {
@@ -89,4 +95,31 @@ test("collectStreamedAudio converts raw PCM streams to wav", async () => {
   assert.equal(result.extension, "wav");
   assert.equal(result.content.readUInt32LE(40), pcm.length);
   assert.deepEqual(result.content.subarray(44), pcm);
+});
+
+test("mergeWavAudioSegments concatenates PCM and inserts silence", () => {
+  const options = {
+    numChannels: 1,
+    sampleRate: 1000,
+    bitsPerSample: 16,
+  } as const;
+  const firstPcm = Buffer.from([1, 0, 2, 0]);
+  const secondPcm = Buffer.from([3, 0]);
+  const firstWav = Buffer.concat([
+    createWavHeader(firstPcm.length, options),
+    firstPcm,
+  ]);
+  const secondWav = Buffer.concat([
+    createWavHeader(secondPcm.length, options),
+    secondPcm,
+  ]);
+
+  const merged = mergeWavAudioSegments([
+    { content: firstWav, silenceAfterMs: 2 },
+    { content: secondWav },
+  ]);
+
+  assert.equal(merged.extension, "wav");
+  assert.equal(merged.mimeType, "audio/wav");
+  assert.deepEqual(merged.content.subarray(44), Buffer.from([1, 0, 2, 0, 0, 0, 0, 0, 3, 0]));
 });

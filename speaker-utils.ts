@@ -18,7 +18,7 @@ export type SpeakerAssignment = {
 };
 
 const TURN_LABEL_PATTERN =
-  /(?:^|(?<=[.!?])\s+)(?<speaker>[A-Z][A-Za-z]*(?: [A-Z][A-Za-z]*)*):\s*/g;
+  /(?:^|(?<=[.!?])\s+)(?<speaker>[A-Z][A-Za-z]*(?: [A-Z0-9][A-Za-z0-9]*)*):\s*/g;
 
 export function hashString(value: string) {
   let hash = 2166136261;
@@ -99,8 +99,28 @@ export function createDeterministicSpeakerAssignments(
     );
   }
 
-  if (availableVoices.length < 2) {
-    throw new Error("At least 2 dialogue voices are required.");
+  return createDeterministicSpeakerAssignmentsForAnyCount(
+    speakers,
+    availableVoices,
+    seedText,
+    transcript,
+  );
+}
+
+export function createDeterministicSpeakerAssignmentsForAnyCount(
+  speakers: string[],
+  availableVoices: VoiceName[],
+  seedText: string,
+  transcript: string,
+): SpeakerAssignment[] {
+  if (speakers.length === 0) {
+    throw new Error("At least 1 speaker is required for voice assignment.");
+  }
+
+  if (availableVoices.length < speakers.length) {
+    throw new Error(
+      `Expected at least ${speakers.length} available voices, received ${availableVoices.length}.`,
+    );
   }
 
   const rng = createRng(hashString(`${seedText}:${transcript}`));

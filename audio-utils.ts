@@ -6,6 +6,11 @@ export interface WavConversionOptions {
   bitsPerSample: number;
 }
 
+export interface WavFileData {
+  pcmData: Buffer;
+  options: WavConversionOptions;
+}
+
 export type AudioChunk = {
   candidates?: Array<{
     content?: {
@@ -72,6 +77,125 @@ export function createWavHeader(dataLength: number, options: WavConversionOption
   buffer.writeUInt32LE(dataLength, 40);
 
   return buffer;
+}
+
+export function parseWavFile(wavBuffer: Buffer): WavFileData {
+  if (wavBuffer.length < 44) {
+    throw new Error("Invalid WAV file: header is too short.");
+  }
+
+  if (wavBuffer.subarray(0, 4).toString("ascii") !== "RIFF") {
+    throw new Error("Invalid WAV file: missing RIFF header.");
+  }
+
+  if (wavBuffer.subarray(8, 12).toString("ascii") !== "WAVE") {
+    throw new Error("Invalid WAV file: missing WAVE signature.");
+  }
+
+  let offset = 12;
+  let fmtChunk: WavConversionOptions | null = null;
+  let dataChunk: Buffer | null = null;
+
+  while (offset + 8 <= wavBuffer.length) {
+    const chunkId = wavBuffer.subarray(offset, offset + 4).toString("ascii");
+    const chunkSize = wavBuffer.readUInt32LE(offset + 4);
+    const chunkStart = offset + 8;
+    const chunkEnd = chunkStart + chunkSize;
+
+    if (chunkEnd > wavBuffer.length) {
+      throw new Error("Invalid WAV file: chunk extends past buffer length.");
+    }
+
+    if (chunkId === "fmt ") {
+      const audioFormat = wavBuffer.readUInt16LE(chunkStart);
+      if (audioFormat !== 1) {
+        throw new Error(
+          `Unsupported WAV encoding: expected PCM (1), received ${audioFormat}.`,
+        );
+      }
+
+      fmtChunk = {
+        numChannels: wavBuffer.readUInt16LE(chunkStart + 2),
+        sampleRate: wavBuffer.readUInt32LE(chunkStart + 4),
+        bitsPerSample: wavBuffer.readUInt16LE(chunkStart + 14),
+      };
+    } else if (chunkId === "data") {
+      dataChunk = wavBuffer.subarray(chunkStart, chunkEnd);
+    }
+
+    offset = chunkEnd + (chunkSize % 2);
+  }
+
+  if (!fmtChunk || !dataChunk) {
+    throw new Error("Invalid WAV file: missing fmt or data chunk.");
+  }
+
+  return {
+    pcmData: dataChunk,
+    options: fmtChunk,
+  };
+}
+
+export function createSilencePcm(
+  durationMs: number,
+  options: WavConversionOptions,
+) {
+  const bytesPerSample = options.bitsPerSample / 8;
+  const frameSize = options.numChannels * bytesPerSample;
+  const frameCount = Math.max(
+    0,
+    Math.round((options.sampleRate * durationMs) / 1000),
+  );
+
+  return Buffer.alloc(frameCount * frameSize);
+}
+
+export function mergeWavAudioSegments(
+  segments: Array<{
+    content: Buffer;
+    silenceAfterMs?: number;
+  }>,
+) {
+  if (segments.length === 0) {
+    throw new Error("At least 1 WAV segment is required for merging.");
+  }
+
+  const parsedSegments = segments.map(({ content, silenceAfterMs = 0 }) => ({
+    ...parseWavFile(content),
+    silenceAfterMs,
+  }));
+
+  const [firstSegment] = parsedSegments;
+  const expectedOptions = firstSegment!.options;
+
+  for (const segment of parsedSegments.slice(1)) {
+    if (
+      segment.options.numChannels !== expectedOptions.numChannels ||
+      segment.options.sampleRate !== expectedOptions.sampleRate ||
+      segment.options.bitsPerSample !== expectedOptions.bitsPerSample
+    ) {
+      throw new Error("Cannot merge WAV segments with mismatched audio formats.");
+    }
+  }
+
+  const pcmParts: Buffer[] = [];
+
+  for (const segment of parsedSegments) {
+    pcmParts.push(segment.pcmData);
+
+    if (segment.silenceAfterMs > 0) {
+      pcmParts.push(createSilencePcm(segment.silenceAfterMs, expectedOptions));
+    }
+  }
+
+  const pcmData = Buffer.concat(pcmParts);
+  const header = createWavHeader(pcmData.length, expectedOptions);
+
+  return {
+    extension: "wav",
+    mimeType: "audio/wav",
+    content: Buffer.concat([header, pcmData]),
+  };
 }
 
 export function convertToWav(rawData: string, mimeType: string) {

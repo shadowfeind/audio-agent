@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "fs/promises";
 import {
   createDeterministicSpeakerAssignments,
+  createDeterministicSpeakerAssignmentsForAnyCount,
   detectTwoSpeakerDialogue,
   parseSpeakerTurns,
 } from "./speaker-utils";
@@ -49,6 +50,17 @@ test("detectTwoSpeakerDialogue rejects transcripts with more than two speakers",
   assert.equal(detectTwoSpeakerDialogue(transcript), null);
 });
 
+test("parseSpeakerTurns supports numeric speaker labels", () => {
+  const transcript =
+    "Speaker 1: First point. Speaker 2: Second point. Speaker 3: Final point.";
+
+  assert.deepEqual(parseSpeakerTurns(transcript), [
+    { speaker: "Speaker 1", text: "First point." },
+    { speaker: "Speaker 2", text: "Second point." },
+    { speaker: "Speaker 3", text: "Final point." },
+  ]);
+});
+
 test("createDeterministicSpeakerAssignments is stable and distinct", () => {
   const speakers = ["Speaker A", "Speaker B"];
   const transcript = "Speaker A: Hello. Speaker B: Hi.";
@@ -67,6 +79,25 @@ test("createDeterministicSpeakerAssignments is stable and distinct", () => {
 
   assert.deepEqual(first, second);
   assert.notEqual(first[0]?.voiceName, first[1]?.voiceName);
+});
+
+test("createDeterministicSpeakerAssignmentsForAnyCount supports three speakers", () => {
+  const speakers = ["Speaker 1", "Speaker 2", "Speaker 3"];
+  const transcript =
+    "Speaker 1: Opening. Speaker 2: Counterpoint. Speaker 3: Summary.";
+  const assignments = createDeterministicSpeakerAssignmentsForAnyCount(
+    speakers,
+    ["Kore", "Fenrir", "Enceladus", "Achernar"],
+    "speaking-exam-1",
+    transcript,
+  );
+
+  assert.equal(assignments.length, 3);
+  assert.equal(new Set(assignments.map((entry) => entry.voiceName)).size, 3);
+  assert.deepEqual(
+    assignments.map((entry) => entry.speaker),
+    speakers,
+  );
 });
 
 test("exam1 and exam2 dialogue transcripts qualify for two-speaker mode", async () => {
@@ -119,4 +150,23 @@ test("exam1 and exam2 dialogue transcripts qualify for two-speaker mode", async 
     "Speaker B",
   ]);
   assert.equal(detectTwoSpeakerDialogue(lecture ?? ""), null);
+});
+
+test("speaking exam discussion transcripts retain numbered speaker labels", async () => {
+  const exam = JSON.parse(
+    await readFile(
+      "/Users/travestroy/Documents/react/goal-grid/questions/pte/speaking/exam1.json",
+      "utf8",
+    ),
+  ) as Array<{ questions?: Array<{ title: string; assets?: Array<{ transcript?: string }> }> }>;
+
+  const questions = exam[0]?.questions ?? [];
+  const libraryDiscussion = questions.find(
+    (question) => question.title === "University Library Expansion",
+  )?.assets?.[0]?.transcript;
+
+  assert.deepEqual(
+    parseSpeakerTurns(libraryDiscussion ?? "").map((turn) => turn.speaker),
+    ["Speaker 1", "Speaker 2", "Speaker 3"],
+  );
 });
