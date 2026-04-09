@@ -12,6 +12,25 @@ function isDescribeImageQuestion(question: ExamQuestion) {
   return question.questionType === "describe_image";
 }
 
+function getQuotaExhaustionMessage(error: unknown) {
+  const message =
+    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+
+  if (!message) {
+    return null;
+  }
+
+  if (
+    message.includes("RESOURCE_EXHAUSTED") ||
+    message.includes("Quota exceeded") ||
+    message.includes("current quota")
+  ) {
+    return `Image generation aborted because Gemini quota is exhausted. ${message}`;
+  }
+
+  return null;
+}
+
 export async function generateImagesPipeline(params: {
   examPath: string;
   outputDir: string;
@@ -32,6 +51,7 @@ export async function generateImagesPipeline(params: {
 
   const manifest: ImageManifestEntry[] = [];
   const manifestPath = path.join(finalOutputDir, "manifest.json");
+  let abortReason: string | null = null;
 
   for (const [index, question] of questions.entries()) {
     const baseEntry: Omit<
@@ -54,6 +74,19 @@ export async function generateImagesPipeline(params: {
         uploadedKey: null,
         status: "skipped",
         error: "Question type does not require generated images.",
+      });
+      await persistManifest();
+      continue;
+    }
+
+    if (abortReason) {
+      manifest.push({
+        ...baseEntry,
+        outputFile: null,
+        uploadedUrl: null,
+        uploadedKey: null,
+        status: "skipped",
+        error: abortReason,
       });
       await persistManifest();
       continue;
@@ -117,6 +150,11 @@ export async function generateImagesPipeline(params: {
       });
       await persistManifest();
     } catch (error) {
+      const quotaMessage = getQuotaExhaustionMessage(error);
+      if (quotaMessage) {
+        abortReason = quotaMessage;
+      }
+
       manifest.push({
         ...baseEntry,
         outputFile: null,
@@ -124,7 +162,8 @@ export async function generateImagesPipeline(params: {
         uploadedKey: null,
         status: "failed",
         error:
-          error instanceof Error ? error.message : "Unknown generation error.",
+          quotaMessage ||
+          (error instanceof Error ? error.message : "Unknown generation error."),
       });
       await persistManifest();
     }
@@ -134,6 +173,7 @@ export async function generateImagesPipeline(params: {
     outputDir: finalOutputDir,
     manifestPath,
     manifest,
+    abortReason,
   };
 
   async function persistManifest() {

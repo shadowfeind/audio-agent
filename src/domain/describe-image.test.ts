@@ -65,5 +65,8 @@ test("buildImagePrompt includes exam rendering guidance", () => {
 
   assert.match(prompt, /Create a clean academic line graph\./);
   assert.match(prompt, /exactly one clean exam-style educational image/i);
+  assert.match(prompt, /Use correct English spelling in all visible text\./);
+  assert.match(prompt, /must exactly match the requested wording/i);
+  assert.match(prompt, /standard exam-prep quality and normal detail/i);
   assert.match(prompt, /Target description: A line graph comparing device usage\./);
 });

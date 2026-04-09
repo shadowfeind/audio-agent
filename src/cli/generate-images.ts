@@ -32,6 +32,9 @@ export async function runImagesCli(argv = process.argv.slice(2)) {
     `Completed image generation. Success: ${successCount}, Failed: ${failureCount}, Skipped: ${skippedCount}`,
   );
   console.log(`Manifest written to ${result.manifestPath}`);
+  if (result.abortReason) {
+    console.log(result.abortReason);
+  }
   console.log(
     uploader
       ? "UploadThing sync enabled."

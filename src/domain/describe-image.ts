@@ -40,7 +40,11 @@ export function buildImagePrompt(asset: ImageAsset) {
   const promptParts = [
     instruction,
     "Produce exactly one clean exam-style educational image.",
+    "Use correct English spelling in all visible text.",
+    "Do not misspell any labels, titles, legends, axis text, or annotations.",
+    "If text appears in the image, it must exactly match the requested wording.",
     "Keep the background light and the composition uncluttered.",
+    "Use standard exam-prep quality and normal detail, not premium or highly detailed rendering.",
     "Avoid watermarks, logos, decorative frames, and irrelevant extra elements.",
   ];
 

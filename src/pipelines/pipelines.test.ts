@@ -207,6 +207,65 @@ test("generateImagesPipeline patches uploaded image URLs and skips unrelated tas
   );
 });
 
+test("generateImagesPipeline aborts remaining describe-image work on quota exhaustion", async () => {
+  const tempDir = await createTempDir();
+  const examPath = path.join(tempDir, "images-quota.json");
+  const exam: ExamFile = [
+    {
+      title: "Speaking",
+      questions: [
+        {
+          title: "Chart One",
+          questionType: "describe_image",
+          assets: [
+            {
+              kind: "image",
+              altText: "A bar chart.",
+              metadata: {
+                imageInstruction: "Create a clean academic bar chart.",
+              },
+            },
+          ],
+        },
+        {
+          title: "Chart Two",
+          questionType: "describe_image",
+          assets: [
+            {
+              kind: "image",
+              altText: "A pie chart.",
+              metadata: {
+                imageInstruction: "Create a clean academic pie chart.",
+              },
+            },
+          ],
+        },
+      ],
+    },
+  ];
+  await writeFile(examPath, `${JSON.stringify(exam, null, 2)}\n`, "utf8");
+
+  let calls = 0;
+  const result = await generateImagesPipeline({
+    examPath,
+    outputDir: "",
+    imageProvider: {
+      async generateImage() {
+        calls += 1;
+        throw new Error(
+          "{\"error\":{\"code\":429,\"message\":\"You exceeded your current quota.\",\"status\":\"RESOURCE_EXHAUSTED\"}}",
+        );
+      },
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.manifest[0]?.status, "failed");
+  assert.equal(result.manifest[1]?.status, "skipped");
+  assert.match(result.abortReason ?? "", /quota is exhausted/i);
+  assert.match(result.manifest[1]?.error ?? "", /quota is exhausted/i);
+});
+
 test("syncManifestUploadsPipeline uploads local outputs and patches the exam", async () => {
   const tempDir = await createTempDir();
   const examPath = path.join(tempDir, "listening.json");
