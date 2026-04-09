@@ -24,6 +24,12 @@ export type AudioChunk = {
   }>;
 };
 
+export type GeneratedAudio = {
+  extension: string;
+  mimeType: string;
+  content: Buffer;
+};
+
 export function parseMimeType(mimeType: string): WavConversionOptions {
   const [fileType, ...params] = mimeType.split(";").map((segment) => segment.trim());
   const [, format] = fileType.split("/");
@@ -155,7 +161,7 @@ export function mergeWavAudioSegments(
     content: Buffer;
     silenceAfterMs?: number;
   }>,
-) {
+): GeneratedAudio {
   if (segments.length === 0) {
     throw new Error("At least 1 WAV segment is required for merging.");
   }
@@ -211,7 +217,7 @@ export function extractAudioPart(chunk: AudioChunk) {
 
 export async function collectStreamedAudio(
   response: AsyncIterable<AudioChunk>,
-) {
+): Promise<GeneratedAudio> {
   const base64Chunks: string[] = [];
   let mimeType = "";
 

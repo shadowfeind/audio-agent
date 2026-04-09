@@ -1,15 +1,16 @@
 {
   "name": "audio-agent",
   "version": "1.0.0",
-  "description": "",
+  "description": "Modular CLI for generating PTE listening, speaking, and describe-image assets.",
   "main": "index.js",
   "scripts": {
-    "create": "tsx agent.ts",
-    "single": "tsx single-agent.ts",
-    "test": "node --import tsx --test *.test.ts",
-    "generate:listening": "tsx generate-listening-exam-audio.ts",
-    "generate:speaking": "tsx generate-speaking-exam-audio.ts",
-    "upload:exam1": "tsx upload-existing-audio.ts"
+    "create": "tsx src/cli/create-sample.ts",
+    "single": "tsx src/cli/single-sample.ts",
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "generate:listening": "tsx src/cli/generate-listening.ts",
+    "generate:speaking": "tsx src/cli/generate-speaking.ts",
+    "generate:images": "tsx src/cli/generate-images.ts",
+    "upload:exam1": "tsx src/cli/sync-manifest.ts"
   },
   "keywords": [],
   "author": "",
