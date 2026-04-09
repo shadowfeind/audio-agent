@@ -27,8 +27,6 @@ export function createGeminiImageProvider(apiKey: string): GeminiImageProvider {
           numberOfImages: 1,
           aspectRatio,
           outputMimeType: "image/png",
-          addWatermark: false,
-          enhancePrompt: false,
         },
       });
 
