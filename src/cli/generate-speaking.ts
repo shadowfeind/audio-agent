@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { parseGenerationArgs } from "../core/args";
-import { requireEnv, getOptionalToken } from "../core/env";
+import { requireEnv, getOptionalToken, logEnvStatus } from "../core/env";
 import { generateSpeakingAudioPipeline } from "../pipelines/generate-speaking-audio";
 import { createGeminiAudioProvider } from "../providers/gemini-audio";
 import { createUploadThingProvider } from "../providers/uploadthing";
@@ -11,8 +11,10 @@ export async function runSpeakingCli(argv = process.argv.slice(2)) {
       "Usage: npm run generate:speaking -- <exam-json-path> [--output <dir>] [--seed <value>]",
     allowSeed: true,
   });
-  const audioProvider = createGeminiAudioProvider(requireEnv("GEMINI_API_KEY"));
   const uploadToken = getOptionalToken("UPLOADTHING_TOKEN");
+  logEnvStatus("GEMINI_API_KEY");
+  logEnvStatus("UPLOADTHING_TOKEN");
+  const audioProvider = createGeminiAudioProvider(requireEnv("GEMINI_API_KEY"));
   const uploader = uploadToken ? createUploadThingProvider(uploadToken) : undefined;
 
   const result = await generateSpeakingAudioPipeline({

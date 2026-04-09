@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { parseUploadSyncArgs } from "../core/args";
-import { requireEnv } from "../core/env";
+import { requireEnv, logEnvStatus } from "../core/env";
 import { syncManifestUploadsPipeline } from "../pipelines/sync-manifest";
 import { createUploadThingProvider } from "../providers/uploadthing";
 
@@ -9,6 +9,7 @@ export async function runSyncManifestCli(argv = process.argv.slice(2)) {
     argv,
     "Usage: npm run upload:exam1 -- <exam-json-path> <manifest-path> [--expected-count <n>]",
   );
+  logEnvStatus("UPLOADTHING_TOKEN");
 
   await syncManifestUploadsPipeline({
     ...args,

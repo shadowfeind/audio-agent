@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { parseGenerationArgs } from "../core/args";
-import { requireEnv, getOptionalToken } from "../core/env";
+import { requireEnv, getOptionalToken, logEnvStatus } from "../core/env";
 import { generateImagesPipeline } from "../pipelines/generate-images";
 import { createGeminiImageProvider } from "../providers/gemini-image";
 import { createUploadThingProvider } from "../providers/uploadthing";
@@ -11,8 +11,10 @@ export async function runImagesCli(argv = process.argv.slice(2)) {
       "Usage: npm run generate:images -- <exam-json-path> [--output <dir>]",
     allowSeed: false,
   });
-  const imageProvider = createGeminiImageProvider(requireEnv("GEMINI_API_KEY"));
   const uploadToken = getOptionalToken("UPLOADTHING_TOKEN");
+  logEnvStatus("GEMINI_API_KEY");
+  logEnvStatus("UPLOADTHING_TOKEN");
+  const imageProvider = createGeminiImageProvider(requireEnv("GEMINI_API_KEY"));
   const uploader = uploadToken ? createUploadThingProvider(uploadToken) : undefined;
 
   const result = await generateImagesPipeline({
